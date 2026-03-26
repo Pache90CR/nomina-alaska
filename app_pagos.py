@@ -4,40 +4,33 @@ import pandas as pd
 from datetime import datetime, timedelta
 import urllib.parse
 
-# Configuración de la App
-st.set_page_config(page_title="Nómina Alaska Cloud", layout="wide")
-st.title("🕒 Gestión de Pagos: Alaska / La Chinita")
-
 # TARIFA FIJA
 TARIFA_POR_HORA = 1300
 
-# Diccionario de días
-DIAS_ESPANOL = {
-    "Monday": "Lunes", "Tuesday": "Martes", "Wednesday": "Miércoles",
-    "Thursday": "Jueves", "Friday": "Viernes", "Saturday": "Sábado", "Sunday": "Domingo"
-}
+st.set_page_config(page_title="Nómina Alaska Cloud", layout="wide")
+st.title("🕒 Pagos: Alaska / La Chinita")
 
 # Conexión a Google Sheets
-# Nota: La URL de la hoja se configura en el paso de "Secrets" en Streamlit Cloud
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def cargar_datos():
     try:
-        return conn.read(ttl="0s") # ttl=0 para que siempre refresque los datos
+        # Cargamos los datos limpios de la hoja
+        return conn.read(ttl="0s")
     except:
         return pd.DataFrame(columns=["Fecha", "Trabajador", "Entrada", "Salida", "Horas", "Pago Total"])
 
 db_pagos = cargar_datos()
 
-# --- REGISTRO DIARIO (BARRA LATERAL) ---
-st.sidebar.header("📝 Registrar Turno")
+# --- REGISTRO ---
+st.sidebar.header("📝 Nuevo Turno")
 with st.sidebar.form("form_registro", clear_on_submit=True):
-    nombre_reg = st.text_input("Nombre del Trabajador")
+    nombre_reg = st.text_input("Trabajador")
     fecha_reg = st.date_input("Fecha", datetime.now())
     col1, col2 = st.columns(2)
     h_in = col1.time_input("Entrada", datetime.strptime("08:00", "%H:%M"))
     h_out = col2.time_input("Salida", datetime.strptime("17:00", "%H:%M"))
-    guardar = st.form_submit_button("💾 Guardar en la Nube")
+    guardar = st.form_submit_button("💾 Guardar")
 
 if guardar and nombre_reg:
     dt_in = datetime.combine(fecha_reg, h_in)
@@ -56,53 +49,31 @@ if guardar and nombre_reg:
         "Pago Total": round(pago_dia, 2)
     }])
     
-    # Actualizar Google Sheets
+    # Actualizar la hoja de cálculo
     updated_df = pd.concat([db_pagos, nuevo_dato], ignore_index=True)
     conn.update(data=updated_df)
-    st.sidebar.success("✅ ¡Guardado en Google Sheets!")
+    st.sidebar.success("✅ Guardado en la Nube")
     st.rerun()
 
-# --- REPORTE Y WHATSAPP ---
+# --- COMPROBANTE ---
 st.header("📊 Comprobante de Pago")
 if not db_pagos.empty:
-    col_a, col_b, col_c = st.columns(3)
-    with col_a:
-        empleados = sorted(db_pagos["Trabajador"].unique())
-        emp_sel = st.selectbox("Empleado", empleados)
-    with col_b:
-        f_ini = st.date_input("Desde", datetime.now() - timedelta(days=7))
-    with col_c:
-        f_fin = st.date_input("Hasta", datetime.now())
+    emp_sel = st.selectbox("Seleccionar Empleado", sorted(db_pagos["Trabajador"].unique()))
+    
+    # Filtrar datos del empleado
+    df_emp = db_pagos[db_pagos["Trabajador"] == emp_sel].copy()
+    t_h = df_emp["Horas"].sum()
+    t_p = df_emp["Pago Total"].sum()
+    
+    msg = (f"*PAGO ALASKA*\nTrabajador: {emp_sel}\n"
+           f"Total Horas: {t_h:.2f}\nTotal: c{t_p:,.2f}")
+    
+    st.link_button(f"📲 Enviar a {emp_sel} por WhatsApp", f"https://wa.me/?text={urllib.parse.quote(msg)}")
+    st.dataframe(df_emp, use_container_width=True)
 
-    # Filtrar
-    db_pagos['Fecha_dt'] = pd.to_datetime(db_pagos['Fecha']).dt.date
-    mask = (db_pagos["Trabajador"] == emp_sel) & (db_pagos["Fecha_dt"] >= f_ini) & (db_pagos["Fecha_dt"] <= f_fin)
-    resumen = db_pagos.loc[mask].copy()
-
-    if not resumen.empty:
-        t_h = resumen["Horas"].sum()
-        t_p = resumen["Pago Total"].sum()
-        
-        # Texto para WhatsApp
-        detalle = ""
-        for _, r in resumen.iterrows():
-            dia_n = DIAS_ESPANOL[pd.to_datetime(r['Fecha']).strftime('%A')]
-            detalle += f"* {dia_n} {r['Fecha']}: {r['Entrada']} a {r['Salida']} ({r['Horas']}h) -> c{r['Pago Total']}\n"
-
-        msg = (f"*COMPROBANTE - ALASKA*\nTrabajador: {emp_sel}\nPeriodo: {f_ini} al {f_fin}\n"
-               f"--------------------------\n{detalle}--------------------------\n"
-               f"Total Horas: {t_h:.2f}\nTOTAL: c{t_p:,.2f}")
-        
-        st.link_button(f"📲 Enviar a {emp_sel} por WhatsApp", f"https://wa.me/?text={urllib.parse.quote(msg)}")
-        st.dataframe(resumen[["Fecha", "Entrada", "Salida", "Horas", "Pago Total"]], use_container_width=True)
-    else:
-        st.warning("Sin datos para este periodo.")
-
-# --- BORRAR REGISTROS ---
-with st.expander("🗑️ Borrar Registros"):
-    st.write("Cuidado: Esto borra datos de Google Sheets")
-    id_borrar = st.number_input("ID a borrar", 0, len(db_pagos)-1 if len(db_pagos)>0 else 0)
-    if st.button("Confirmar Borrado"):
+with st.expander("🗑️ Borrar"):
+    id_borrar = st.number_input("ID", 0, len(db_pagos)-1 if not db_pagos.empty else 0)
+    if st.button("Eliminar"):
         db_pagos = db_pagos.drop(id_borrar).reset_index(drop=True)
         conn.update(data=db_pagos)
         st.rerun()
