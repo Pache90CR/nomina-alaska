@@ -8,7 +8,7 @@ import urllib.parse
 TARIFA_POR_HORA = 1300
 
 st.set_page_config(page_title="Nómina Alaska Cloud", layout="wide")
-st.title("🕒 Pagos: Alaska / La Chinita")
+st.title("🕒 Pagos: Alaska")
 
 # Conexión a Google Sheets
 conn = st.connection("gsheets", type=GSheetsConnection)
