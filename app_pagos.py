@@ -75,7 +75,7 @@ if guardar and nombre_reg:
         st.error(f"Error al guardar: {e}")
 
 # --- SECCIÓN DE COMPROBANTE ---
-st.header("📊 Generar Comprobante Acumulado")
+st.header("📊 Generar Comprobante")
 if not db_pagos.empty:
     col_a, col_b, col_c = st.columns(3)
     with col_a:
