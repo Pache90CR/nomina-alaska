@@ -112,7 +112,7 @@ if not db_pagos.empty:
             f"*Detalle de turnos:*\n{detalle_texto}"
             f"--------------------------\n"
             f"⏳ *Total Horas:* {total_h:.2f} hrs\n"
-            f"💰 *TOTAL A PAGAR: c{total_p:,.2f}*\n"
+            f"💰 *TOTAL A PAGAR: ¢{total_p:,.2f}*\n"
             f"--------------------------"
         )
         
