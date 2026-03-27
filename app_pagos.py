@@ -6,7 +6,7 @@ import urllib.parse
 
 # Configuración de página
 st.set_page_config(page_title="Nómina Alaska", layout="wide")
-st.title("🕒 Gestión de Pagos: Alaska / La Chinita")
+st.title("🕒 Gestión de Pagos: Alaska)
 
 TARIFA_POR_HORA = 1300
 DIAS_ESPANOL = {
