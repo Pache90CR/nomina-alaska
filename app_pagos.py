@@ -14,13 +14,17 @@ DIAS_ESPANOL = {
     "Thursday": "Jueves", "Friday": "Viernes", "Saturday": "Sábado", "Sunday": "Domingo"
 }
 
+# --- AJUSTE DE HORA COSTA RICA ---
+# Los servidores de Streamlit suelen estar 6 horas adelantados
+fecha_actual_cr = (datetime.now() - timedelta(hours=6)).date()
+
 # Conexión a Google Sheets
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def cargar_datos():
     try:
         df = conn.read(ttl=0)
-        # Convertir a datetime y luego formatear para mostrar
+        # Convertir a datetime respetando el día primero
         df['Fecha'] = pd.to_datetime(df['Fecha'], dayfirst=True)
         return df
     except:
@@ -32,8 +36,8 @@ db_pagos = cargar_datos()
 st.sidebar.header("📝 Registrar Turno")
 with st.sidebar.form("form_registro", clear_on_submit=True):
     nombre_reg = st.text_input("Nombre del Trabajador")
-    # Ajuste de fecha para que por defecto sea hoy 26/03/2026
-    fecha_reg = st.date_input("Fecha", datetime.now())
+    # Ahora por defecto saldrá la fecha de hoy en CR (26/03/2026)
+    fecha_reg = st.date_input("Fecha", fecha_actual_cr)
     col1, col2 = st.columns(2)
     h_in = col1.time_input("Entrada", datetime.strptime("08:00", "%H:%M"))
     h_out = col2.time_input("Salida", datetime.strptime("17:00", "%H:%M"))
@@ -47,7 +51,7 @@ if guardar and nombre_reg:
     cant_horas = (dt_out - dt_in).total_seconds() / 3600
     pago_dia = cant_horas * TARIFA_POR_HORA
     
-    # GUARDAR EN FORMATO DD/MM/YYYY
+    # Formato día/mes/año para la base de datos
     fecha_formateada = fecha_reg.strftime("%d/%m/%Y")
     
     nuevo_dato = pd.DataFrame([{
@@ -60,12 +64,12 @@ if guardar and nombre_reg:
     }])
     
     try:
+        # Concatenar y asegurar el formato antes de subir
         updated_df = pd.concat([db_pagos, nuevo_dato], ignore_index=True)
-        # Limpiar formatos antes de subir
         updated_df['Fecha'] = pd.to_datetime(updated_df['Fecha'], dayfirst=True).dt.strftime("%d/%m/%Y")
         conn.update(data=updated_df)
         st.cache_data.clear()
-        st.sidebar.success(f"✅ Guardado con fecha {fecha_formateada}")
+        st.sidebar.success(f"✅ Guardado: {fecha_formateada}")
         st.rerun()
     except Exception as e:
         st.error(f"Error al guardar: {e}")
@@ -77,11 +81,12 @@ if not db_pagos.empty:
     with col_a:
         emp_sel = st.selectbox("Seleccionar Empleado", sorted(db_pagos["Trabajador"].unique()))
     with col_b:
-        f_inicio = st.date_input("Fecha Inicio", datetime.now() - timedelta(days=7))
+        # Filtros de fecha también ajustados a hoy en CR
+        f_inicio = st.date_input("Fecha Inicio", fecha_actual_cr - timedelta(days=7))
     with col_c:
-        f_fin = st.date_input("Fecha Fin", datetime.now())
+        f_fin = st.date_input("Fecha Fin", fecha_actual_cr)
 
-    # Asegurar que el filtro funcione con el nuevo formato de fecha
+    # Filtro dinámico
     db_pagos['Fecha_filtro'] = pd.to_datetime(db_pagos['Fecha'], dayfirst=True).dt.date
     mask = (db_pagos["Trabajador"] == emp_sel) & \
            (db_pagos["Fecha_filtro"] >= f_inicio) & \
@@ -97,9 +102,7 @@ if not db_pagos.empty:
         for _, r in df_resumen.iterrows():
             f_obj = pd.to_datetime(r['Fecha'], dayfirst=True)
             dia_nombre = DIAS_ESPANOL[f_obj.strftime('%A')]
-            # Texto para WhatsApp en formato DD/MM/YYYY
-            fecha_str = f_obj.strftime("%d/%m/%Y")
-            detalle_texto += f"• {dia_nombre} {fecha_str}: {r['Entrada']} a {r['Salida']} ({r['Horas']}h) -> c{r['Pago Total']}\n"
+            detalle_texto += f"• {dia_nombre} {f_obj.strftime('%d/%m/%Y')}: {r['Entrada']} a {r['Salida']} ({r['Horas']}h) -> c{r['Pago Total']}\n"
 
         msg_final = (
             f"*COMPROBANTE DE PAGO - ALASKA*\n"
@@ -113,19 +116,17 @@ if not db_pagos.empty:
             f"--------------------------"
         )
         
-        url_whatsapp = f"https://wa.me/?text={urllib.parse.quote(msg_final)}"
-        st.link_button(f"📲 Enviar Comprobante de {emp_sel} por WhatsApp", url_whatsapp)
-
-        # Mostrar tabla limpia
+        st.link_button(f"📲 Enviar Comprobante de {emp_sel} por WhatsApp", f"https://wa.me/?text={urllib.parse.quote(msg_final)}")
         st.dataframe(df_resumen[["Fecha", "Entrada", "Salida", "Horas", "Pago Total"]], use_container_width=True)
     else:
-        st.warning("No hay registros para este empleado en las fechas seleccionadas.")
+        st.warning("No hay registros para este periodo.")
 
 # --- ADMINISTRACIÓN ---
 st.markdown("---")
 with st.expander("🗑️ Administración: Eliminar Registros"):
+    # Mostramos la tabla con el ID (índice) a la izquierda
     st.dataframe(db_pagos[["Fecha", "Trabajador", "Horas", "Pago Total"]])
-    id_borrar = st.number_input("ID a borrar", min_value=0, max_value=len(db_pagos)-1 if not db_pagos.empty else 0, step=1)
+    id_borrar = st.number_input("Escriba el ID (número a la izquierda) para borrar", min_value=0, max_value=len(db_pagos)-1 if not db_pagos.empty else 0, step=1)
     if st.button("❌ Eliminar Registro"):
         db_pagos = db_pagos.drop(id_borrar).reset_index(drop=True)
         db_pagos['Fecha'] = pd.to_datetime(db_pagos['Fecha'], dayfirst=True).dt.strftime("%d/%m/%Y")
