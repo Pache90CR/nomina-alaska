@@ -14,11 +14,11 @@ DIAS_ESPANOL = {
     "Thursday": "Jueves", "Friday": "Viernes", "Saturday": "Sábado", "Sunday": "Domingo"
 }
 
-# --- LÓGICA DE TIEMPO ---
+# --- LÓGICA DE TIEMPO COSTA RICA ---
 ahora_cr = datetime.now() - timedelta(hours=6)
 hoy_cr = ahora_cr.date()
 
-# Inicio automático (Viernes) pero modificable
+# Por defecto, mostrar desde el viernes de la semana actual
 dias_desde_viernes = (hoy_cr.weekday() - 4) % 7
 viernes_defecto = hoy_cr - timedelta(days=dias_desde_viernes)
 
@@ -29,8 +29,7 @@ def cargar_datos_limpios():
     try:
         df = conn.read(ttl=0)
         if df is not None and not df.empty:
-            # Esta línea es la que arregla el "cuarto registro":
-            # Convierte cualquier cosa (2026-04-10 o 10/04/2026) a fecha real
+            # CLAVE: Forzamos a que todo sea fecha real, no importa el formato
             df['Fecha'] = pd.to_datetime(df['Fecha'], dayfirst=True, errors='coerce').dt.date
             df = df.dropna(subset=['Fecha', 'Trabajador'])
             return df
@@ -40,7 +39,7 @@ def cargar_datos_limpios():
 
 db_pagos = cargar_datos_limpios()
 
-# --- FORMULARIO DE REGISTRO ---
+# --- REGISTRO ---
 st.sidebar.header("📝 Nuevo Registro")
 with st.sidebar.form("form_registro", clear_on_submit=True):
     nombre_reg = st.text_input("Trabajador")
@@ -57,89 +56,76 @@ if guardar and nombre_reg:
     if dt_out <= dt_in: dt_out += timedelta(days=1)
     
     cant_horas = (dt_out - dt_in).total_seconds() / 3600
-    pago_dia = cant_horas * TARIFA_POR_HORA
     
-    # Guardamos como STRING DD/MM/YYYY para evitar que Google Sheets lo cambie
     nuevo = pd.DataFrame([{
         "Fecha": fecha_reg.strftime("%d/%m/%Y"),
         "Trabajador": nombre_reg.strip().title(),
         "Entrada": h_in.strftime("%H:%M"),
         "Salida": h_out.strftime("%H:%M"),
         "Horas": round(cant_horas, 2),
-        "Pago Total": round(pago_dia, 2)
+        "Pago Total": round(cant_horas * TARIFA_POR_HORA, 2)
     }])
     
     try:
-        # Unificamos todo a texto antes de subir
+        # Unificamos antes de subir
         db_fresca['Fecha'] = pd.to_datetime(db_fresca['Fecha']).dt.strftime("%d/%m/%Y")
         updated = pd.concat([db_fresca, nuevo], ignore_index=True)
         conn.update(data=updated)
         st.cache_data.clear()
-        st.sidebar.success(f"✅ Guardado con éxito")
+        st.sidebar.success("✅ ¡Guardado!")
         st.rerun()
     except Exception as e:
-        st.error(f"Error al guardar: {e}")
+        st.error(f"Error: {e}")
 
-# --- REPORTE CON FILTROS MANUALES ---
+# --- FILTRO Y REPORTE ---
 st.header("📊 Comprobante de Pago")
 
 if not db_pagos.empty:
     col_a, col_b, col_c = st.columns(3)
     with col_a:
-        emp_sel = st.selectbox("Seleccionar Empleado", sorted(db_pagos["Trabajador"].unique()))
+        emp_sel = st.selectbox("Empleado", sorted(db_pagos["Trabajador"].unique()))
     with col_b:
-        # El filtro de inicio ahora es manual pero sugiere el viernes
         f_inicio = st.date_input("Desde", viernes_defecto)
     with col_c:
-        f_fin = st.date_input("Hasta", hoy_cr + timedelta(days=1))
+        f_fin = st.date_input("Hasta", hoy_cr)
 
-    # Filtrado
+    # El filtro ahora compara fechas reales, no texto
     mask = (db_pagos["Trabajador"] == emp_sel) & \
            (db_pagos["Fecha"] >= f_inicio) & \
            (db_pagos["Fecha"] <= f_fin)
     
-    df_resumen = db_pagos.loc[mask].copy()
+    df_res = db_pagos.loc[mask].sort_values('Fecha').copy()
 
-    if not df_resumen.empty:
-        total_h = df_resumen["Horas"].sum()
-        total_p = df_resumen["Pago Total"].sum()
+    if not df_res.empty:
+        t_h, t_p = df_res["Horas"].sum(), df_res["Pago Total"].sum()
         
-        # --- MENSAJE DE WHATSAPP (DISEÑO ORIGINAL COMPLETO) ---
-        detalle_texto = ""
-        for _, r in df_resumen.sort_values('Fecha').iterrows():
-            f_obj = pd.to_datetime(r['Fecha'])
-            dia_nombre = DIAS_ESPANOL[f_obj.strftime('%A')]
-            detalle_texto += f"• {dia_nombre} {f_obj.strftime('%d/%m/%Y')}: {r['Entrada']} a {r['Salida']} ({r['Horas']}h) -> c{r['Pago Total']}\n"
+        detalle = ""
+        for _, r in df_res.iterrows():
+            dia = DIAS_ESPANOL[pd.to_datetime(r['Fecha']).strftime('%A')]
+            detalle += f"• {dia} {r['Fecha'].strftime('%d/%m/%Y')}: {r['Entrada']} a {r['Salida']} ({r['Horas']}h) -> ₡{r['Pago Total']}\n"
 
-        msg_final = (
-            f"*COMPROBANTE DE PAGO - ALASKA*\n"
-            f"👤 *Trabajador:* {emp_sel}\n"
-            f"📅 *Periodo:* {f_inicio.strftime('%d/%m/%Y')} al {f_fin.strftime('%d/%m/%Y')}\n"
-            f"--------------------------\n"
-            f"*Detalle de turnos:*\n{detalle_texto}"
-            f"--------------------------\n"
-            f"⏳ *Total Horas:* {total_h:.2f} hrs\n"
-            f"💰 *TOTAL A PAGAR: c{total_p:,.2f}*\n"
-            f"--------------------------"
-        )
+        msg = (f"*COMPROBANTE DE PAGO - ALASKA*\n👤 *Trabajador:* {emp_sel}\n"
+               f"📅 *Periodo:* {f_inicio.strftime('%d/%m/%Y')} al {f_fin.strftime('%d/%m/%Y')}\n"
+               f"--------------------------\n*Detalle de turnos:*\n{detalle}"
+               f"--------------------------\n⏳ *Total Horas:* {t_h:.2f} hrs\n"
+               f"💰 *TOTAL A PAGAR: ₡{t_p:,.2f}*\n--------------------------")
         
-        st.link_button(f"📲 Enviar Comprobante por WhatsApp", f"https://wa.me/?text={urllib.parse.quote(msg_final)}")
-        st.dataframe(df_resumen[["Fecha", "Entrada", "Salida", "Horas", "Pago Total"]], use_container_width=True)
+        st.link_button("📲 Enviar Comprobante por WhatsApp", f"https://wa.me/?text={urllib.parse.quote(msg)}")
+        st.dataframe(df_res[["Fecha", "Entrada", "Salida", "Horas", "Pago Total"]], use_container_width=True)
     else:
-        st.warning(f"No hay registros. Revisa si la fecha 'Desde' es correcta.")
+        st.warning("No se encontraron registros en este rango.")
 
-# --- ADMINISTRACIÓN ---
-with st.expander("🗑️ Administración: Eliminar Registros"):
-    # Recargamos para ver los IDs actuales
-    df_admin = cargar_datos_limpios()
-    st.dataframe(df_admin)
-    id_borrar = st.number_input("ID a borrar", 0, len(df_admin)-1 if not df_admin.empty else 0, step=1)
-    if st.button("❌ Eliminar Registro"):
-        df_admin = df_admin.drop(id_borrar).reset_index(drop=True)
-        df_admin['Fecha'] = pd.to_datetime(df_admin['Fecha']).dt.strftime("%d/%m/%Y")
-        conn.update(data=df_admin)
+# --- BORRAR ---
+with st.expander("🗑️ Administración: Eliminar"):
+    st.dataframe(db_pagos)
+    id_b = st.number_input("ID a borrar", 0, len(db_pagos)-1 if not db_pagos.empty else 0)
+    if st.button("❌ Eliminar"):
+        db_pagos = db_pagos.drop(id_b).reset_index(drop=True)
+        db_pagos['Fecha'] = pd.to_datetime(db_pagos['Fecha']).dt.strftime("%d/%m/%Y")
+        conn.update(data=db_pagos)
         st.cache_data.clear()
         st.rerun()
+
 
 
 
