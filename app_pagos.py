@@ -7,7 +7,7 @@ import plotly.express as px
 
 # Configuración de página
 st.set_page_config(page_title="Nómina Alaska", layout="wide")
-st.title("🕒 Sistema de Nómina: Alaska / La Chinita")
+st.title("🕒 Sistema de Nómina: Alaska")
 
 TARIFA_POR_HORA = 1300
 DIAS_ESPANOL = {
