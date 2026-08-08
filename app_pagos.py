@@ -43,7 +43,9 @@ db_vales = cargar_datos_limpios("Vales")
 if db_pagos.empty:
     db_pagos = pd.DataFrame(columns=["Fecha", "Trabajador", "Entrada", "Salida", "Horas", "Pago Total"])
 if db_vales.empty:
-    db_vales = pd.DataFrame(columns=["Fecha", "Trabajador", "Monto", "Concepto"])
+    db_vales = pd.DataFrame(columns=["Fecha", "Trabajador", "Monto", "Concepto", "Estado"])
+elif "Estado" not in db_vales.columns:
+    db_vales["Estado"] = "Pendiente"
 
 # --- BARRA LATERAL: REGISTROS ---
 st.sidebar.header("📝 Menú de Registro")
@@ -103,7 +105,8 @@ else:
             "Fecha": f"{fecha_vale.day:02d}/{fecha_vale.month:02d}/{fecha_vale.year}",
             "Trabajador": nombre_vale.strip().title(),
             "Monto": float(monto_vale),
-            "Concepto": concepto_vale.strip()
+            "Concepto": concepto_vale.strip(),
+            "Estado": "Pendiente"
         }
         try:
             if not db_v_fresca.empty:
@@ -111,7 +114,7 @@ else:
             updated_v = pd.concat([db_v_fresca, pd.DataFrame([nueva_fila_v])], ignore_index=True)
             conn.update(worksheet="Vales", data=updated_v)
             st.cache_data.clear()
-            st.sidebar.success("✅ Vale guardado")
+            st.sidebar.success("✅ Vale guardado como Pendiente")
             st.rerun()
         except Exception as e:
             st.error(f"Error al guardar vale: {e}")
@@ -124,7 +127,6 @@ with tab1:
     if not db_pagos.empty:
         col_a, col_b, col_c = st.columns(3)
         
-        # Lista unificada de trabajadores
         emp_lista = sorted(list(set(db_pagos["Trabajador"].unique()).union(set(db_vales["Trabajador"].unique())))) if not db_vales.empty else sorted(db_pagos["Trabajador"].unique())
         
         with col_a:
@@ -140,11 +142,17 @@ with tab1:
                (db_pagos["Fecha"] <= f_fin)
         df_res = db_pagos.loc[mask].sort_values('Fecha').copy()
 
-        # Filtrar vales
-        mask_v = (db_vales["Trabajador"] == emp_sel) & \
-                 (db_vales["Fecha"] >= f_inicio) & \
-                 (db_vales["Fecha"] <= f_fin) if not db_vales.empty else pd.Series([False]*len(db_vales))
-        df_v_res = db_vales.loc[mask_v].sort_values('Fecha').copy() if not db_vales.empty else pd.DataFrame()
+        # Filtrar SOLO VALES PENDIENTES
+        if not db_vales.empty:
+            if "Estado" not in db_vales.columns:
+                db_vales["Estado"] = "Pendiente"
+            mask_v = (db_vales["Trabajador"] == emp_sel) & \
+                     (db_vales["Fecha"] >= f_inicio) & \
+                     (db_vales["Fecha"] <= f_fin) & \
+                     (db_vales["Estado"] == "Pendiente")
+            df_v_res = db_vales.loc[mask_v].sort_values('Fecha').copy()
+        else:
+            df_v_res = pd.DataFrame()
 
         if not df_res.empty or not df_v_res.empty:
             total_h = df_res["Horas"].sum() if not df_res.empty else 0.0
@@ -161,13 +169,13 @@ with tab1:
             else:
                 detalle = "• No hay turnos registrados en este periodo.\n"
 
-            # Detalle vales
+            # Detalle vales pendientes
             detalle_vales = ""
             if not df_v_res.empty:
                 for _, rv in df_v_res.iterrows():
                     detalle_vales += f"• {rv['Fecha'].strftime('%d/%m/%Y')}: {rv['Concepto']} -> -₡{rv['Monto']:,.2f}\n"
 
-            # Construir mensaje de WhatsApp
+            # Mensaje para WhatsApp
             msg = (f"*COMPROBANTE DE PAGO - ALASKA*\n👤 *Trabajador:* {emp_sel}\n"
                    f"📅 *Periodo:* {f_inicio.strftime('%d/%m/%Y')} al {f_fin.strftime('%d/%m/%Y')}\n"
                    f"--------------------------\n*Detalle de turnos:*\n{detalle}"
@@ -176,13 +184,37 @@ with tab1:
                    f"💵 *Bruto Devengado:* ₡{total_p:,.2f}\n")
 
             if not df_v_res.empty:
-                msg += f"--------------------------\n*Rebajo de Vales/Adelantos:*\n{detalle_vales}"
+                msg += f"--------------------------\n*Rebajo de Vales/Adelantos (Pendientes):*\n{detalle_vales}"
                 msg += f"🔻 *Total Vales/Adelantos:* -₡{total_v:,.2f}\n"
 
             msg += f"--------------------------\n💰 *NETO A PAGAR: ₡{neto_pagar:,.2f}*\n--------------------------"
 
-            st.link_button("📲 Enviar Comprobante por WhatsApp", f"https://wa.me/?text={urllib.parse.quote(msg)}")
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                st.link_button("📲 Enviar Comprobante por WhatsApp", f"https://wa.me/?text={urllib.parse.quote(msg)}")
             
+            with col_btn2:
+                # Botón para marcar vales como liquidados
+                if not df_v_res.empty:
+                    if st.button("✅ Liquidar y Cerrar Vales de este Pago"):
+                        try:
+                            # Cargar base completa de vales
+                            db_v_completa = conn.read(worksheet="Vales", ttl=0)
+                            
+                            # Convertir fechas a string para comparar fácil
+                            indices_a_liquidar = df_v_res.index
+                            db_v_completa.loc[indices_a_liquidar, "Estado"] = "Liquidado"
+                            
+                            # Mantener formato fecha
+                            db_v_completa['Fecha'] = pd.to_datetime(db_v_completa['Fecha'], dayfirst=True, errors='coerce').dt.strftime("%d/%m/%Y")
+                            
+                            conn.update(worksheet="Vales", data=db_v_completa)
+                            st.cache_data.clear()
+                            st.success("🎉 ¡Vales liquidados exitosamente! No volverán a rebajarse.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al liquidar vales: {e}")
+
             st.subheader("📋 Resumen de Turnos")
             if not df_res.empty:
                 st.dataframe(df_res[["Fecha", "Entrada", "Salida", "Horas", "Pago Total"]], use_container_width=True)
@@ -190,10 +222,10 @@ with tab1:
                 st.info("No hay turnos en este rango.")
 
             if not df_v_res.empty:
-                st.subheader("💸 Vales y Adelantos a Rebajar")
-                st.dataframe(df_v_res[["Fecha", "Concepto", "Monto"]], use_container_width=True)
+                st.subheader("💸 Vales Pendientes Aplicados en este Comprobante")
+                st.dataframe(df_v_res[["Fecha", "Concepto", "Monto", "Estado"]], use_container_width=True)
         else:
-            st.warning("No hay turnos ni vales registrados en el rango seleccionado.")
+            st.warning("No hay turnos ni vales pendientes registrados en el rango seleccionado.")
     else:
         st.info("No hay datos cargados.")
 
