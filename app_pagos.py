@@ -31,6 +31,14 @@ def cargar_datos_limpios(worksheet_name="Hoja 1"):
                 df['Fecha'] = pd.to_datetime(df['Fecha'], format='%d/%m/%Y', errors='coerce').dt.date
                 df.loc[df['Fecha'].isna(), 'Fecha'] = pd.to_datetime(df['Fecha'], errors='coerce').dt.date
                 df = df.dropna(subset=['Fecha'])
+            
+            # Limpieza especial de PINs (convierte 1806.0 a "1806")
+            if "PIN" in df.columns:
+                df["PIN"] = df["PIN"].astype(str).str.replace(".0", "", regex=False).str.strip()
+            
+            if "Trabajador" in df.columns:
+                df["Trabajador"] = df["Trabajador"].astype(str).str.strip()
+                
             return df
         return pd.DataFrame()
     except:
@@ -45,9 +53,8 @@ if db_pagos.empty:
 if db_vales.empty:
     db_vales = pd.DataFrame(columns=["Fecha", "Trabajador", "Monto", "Concepto", "Estado"])
 if db_pines.empty:
-    # PIN por defecto: Administrador = 0000, Gladys = 1234
     db_pines = pd.DataFrame([
-        {"Trabajador": "Administrador", "PIN": "0000", "Rol": "Admin"},
+        {"Trabajador": "Administrador", "PIN": "1806", "Rol": "Admin"},
         {"Trabajador": "Gladys", "PIN": "1234", "Rol": "Empleado"}
     ])
 
@@ -64,13 +71,13 @@ if not st.session_state["autenticado"]:
     
     lista_usuarios = sorted(db_pines["Trabajador"].unique()) if not db_pines.empty else ["Administrador"]
     usuario_sel = st.selectbox("Selecciona tu Nombre", lista_usuarios)
-    pin_ingresado = st.text_input("PIN de 4 dígitos", type="password", max_chars=4)
+    pin_ingresado = st.text_input("PIN de 4 dígitos", type="password", max_chars=4).strip()
     
     if st.button("🔓 Entrar"):
         usuario_info = db_pines[db_pines["Trabajador"] == usuario_sel]
         if not usuario_info.empty:
-            pin_real = str(usuario_info["PIN"].values[0])
-            rol_real = str(usuario_info["Rol"].values[0]) if "Rol" in usuario_info.columns else ("Admin" if usuario_sel == "Administrador" else "Empleado")
+            pin_real = str(usuario_info["PIN"].values[0]).replace(".0", "").strip()
+            rol_real = str(usuario_info["Rol"].values[0]).strip() if "Rol" in usuario_info.columns else ("Admin" if usuario_sel == "Administrador" else "Empleado")
             
             if pin_ingresado == pin_real:
                 st.session_state["autenticado"] = True
@@ -201,7 +208,7 @@ else:
 
             if guardar_p and emp_pin and len(num_pin) == 4:
                 db_p_fresca = cargar_datos_limpios("Pines")
-                nuevo_p = {"Trabajador": emp_pin.strip().title(), "PIN": str(num_pin), "Rol": rol_sel}
+                nuevo_p = {"Trabajador": emp_pin.strip().title(), "PIN": str(num_pin).strip(), "Rol": rol_sel}
                 try:
                     if not db_p_fresca.empty:
                         db_p_fresca = db_p_fresca[db_p_fresca["Trabajador"] != emp_pin.strip().title()]
@@ -287,7 +294,7 @@ else:
                                     st.success("🎉 ¡Vales liquidados exitosamente!")
                                     st.rerun()
                                 except Exception as e:
-                                    st.error(f"Error al liquidar vales: {e}")
+                                    st.error("Error al liquidar vales.")
 
                     st.dataframe(df_res[["Fecha", "Entrada", "Salida", "Horas", "Pago Total"]], use_container_width=True)
                     if not df_v_res.empty:
