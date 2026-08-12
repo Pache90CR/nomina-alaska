@@ -286,8 +286,8 @@ else:
                                     st.cache_data.clear()
                                     st.success("🎉 ¡Vales liquidados exitosamente!")
                                     st.rerun()
-                                mexc:
-                                    st.error("Error al liquidar vales.")
+                                except Exception as e:
+                                    st.error(f"Error al liquidar vales: {e}")
 
                     st.dataframe(df_res[["Fecha", "Entrada", "Salida", "Horas", "Pago Total"]], use_container_width=True)
                     if not df_v_res.empty:
