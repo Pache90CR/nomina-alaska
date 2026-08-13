@@ -3,3 +3,4 @@ pandas
 st-gsheets-connection
 openpyxl
 plotly
+streamlit-qrcode-scanner
