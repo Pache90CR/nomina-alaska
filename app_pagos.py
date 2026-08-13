@@ -1,5 +1,6 @@
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
+from streamlit_qrcode_scanner import qrcode_scanner
 import pandas as pd
 from datetime import datetime, timedelta
 import urllib.parse
@@ -32,7 +33,6 @@ def cargar_datos_limpios(worksheet_name="Hoja 1"):
                 df.loc[df['Fecha'].isna(), 'Fecha'] = pd.to_datetime(df['Fecha'], errors='coerce').dt.date
                 df = df.dropna(subset=['Fecha'])
             
-            # Limpieza especial de PINs (convierte 1806.0 a "1806")
             if "PIN" in df.columns:
                 df["PIN"] = df["PIN"].astype(str).str.replace(".0", "", regex=False).str.strip()
             
@@ -54,91 +54,49 @@ if db_vales.empty:
     db_vales = pd.DataFrame(columns=["Fecha", "Trabajador", "Monto", "Concepto", "Estado"])
 if db_pines.empty:
     db_pines = pd.DataFrame([
-        {"Trabajador": "Administrador", "PIN": "1806", "Rol": "Admin"},
-        {"Trabajador": "Gladys", "PIN": "1234", "Rol": "Empleado"}
+        {"Trabajador": "Administrador", "PIN": "1806", "Rol": "Admin", "Codigo_QR": "ADMIN-001", "Estado": "Activo"},
+        {"Trabajador": "Gladys", "PIN": "1234", "Rol": "Empleado", "Codigo_QR": "EMP-GLADYS", "Estado": "Activo"}
     ])
 
-# --- INICIALIZAR SESIÓN DE USUARIO ---
-if "autenticado" not in st.session_state:
-    st.session_state["autenticado"] = False
-    st.session_state["usuario"] = ""
-    st.session_state["rol"] = ""
+if "Estado" not in db_pines.columns:
+    db_pines["Estado"] = "Activo"
 
-# --- PANTALLA DE INICIO DE SESIÓN (LOGIN) ---
-if not st.session_state["autenticado"]:
-    st.title("🔒 Control de Acceso: Bar Restaurante Alaska")
-    st.subheader("Ingresa tu PIN para acceder al sistema")
+# --- MÓDULO PRINCIPAL DE PANTALLA ---
+st.title("🕒 Bar Restaurante Alaska: Control de Asistencia")
+
+# MODO SELECCIÓN DE PANTALLA
+modo_pantalla = st.sidebar.radio("Modo de Operación", ["📷 Escáner de Asistencia (Cámara Web)", "🛡️ Acceso Administrador"])
+
+# =========================================================================
+# MODO 1: ESCÁNER CON CÁMARA WEB EN LA COMPUTADORA DEL LOCAL
+# =========================================================================
+if modo_pantalla == "📷 Escáner de Asistencia (Cámara Web)":
+    st.subheader("Muestra tu código QR frente a la cámara web de la computadora")
+    st.info("El sistema registrará tu Entrada o Salida automáticamente al detectar tu QR.")
     
-    lista_usuarios = sorted(db_pines["Trabajador"].unique()) if not db_pines.empty else ["Administrador"]
-    usuario_sel = st.selectbox("Selecciona tu Nombre", lista_usuarios)
-    pin_ingresado = st.text_input("PIN de 4 dígitos", type="password", max_chars=4).strip()
+    # Lector de código QR usando la cámara nativa de la laptop/PC
+    qr_detectado = qrcode_scanner(key="scanner_camara")
     
-    if st.button("🔓 Entrar"):
-        usuario_info = db_pines[db_pines["Trabajador"] == usuario_sel]
-        if not usuario_info.empty:
-            pin_real = str(usuario_info["PIN"].values[0]).replace(".0", "").strip()
-            rol_real = str(usuario_info["Rol"].values[0]).strip() if "Rol" in usuario_info.columns else ("Admin" if usuario_sel == "Administrador" else "Empleado")
-            
-            if pin_ingresado == pin_real:
-                st.session_state["autenticado"] = True
-                st.session_state["usuario"] = usuario_sel
-                st.session_state["rol"] = rol_real
-                st.success(f"Bienvenido/a {usuario_sel}")
-                st.rerun()
-            else:
-                st.error("❌ PIN incorrecto.")
-        else:
-            st.error("Usuario no encontrado.")
-
-else:
-    # BOTÓN DE CERRAR SESIÓN EN LA BARRA LATERAL
-    st.sidebar.write(f"👤 **Usuario:** {st.session_state['usuario']}")
-    st.sidebar.write(f"🔑 **Rol:** {st.session_state['rol']}")
-    if st.sidebar.button("🔒 Cerrar Sesión"):
-        st.session_state["autenticado"] = False
-        st.session_state["usuario"] = ""
-        st.session_state["rol"] = ""
-        st.rerun()
-
-    # =========================================================================
-    # VISTA 1: PANTALLA EXCLUSIVA DE EMPLEADO (SOLO MARCAJE DE ENTRADA/SALIDA)
-    # =========================================================================
-    if st.session_state["rol"] == "Empleado":
-        st.title(f"🕒 Marcaje de Asistencia: {st.session_state['usuario']}")
-        st.info("Utiliza esta pantalla para marcar el inicio o fin de tu turno de trabajo.")
+    if qr_detectado:
+        qr_limpio = str(qr_detectado).strip()
         
-        tipo_marcaje = st.radio("Acción a realizar", ["Marcar Entrada", "Marcar Salida"], horizontal=True)
+        # Buscar usuario correspondiente al código QR
+        usuario_encontrado = db_pines[db_pines["Codigo_QR"] == qr_limpio] if "Codigo_QR" in db_pines.columns else pd.DataFrame()
         
-        if st.button("⏱️ Confirmar Marcaje Ahora", use_container_width=True):
-            hora_actual_str = ahora_cr.strftime("%H:%M")
-            fecha_actual_str = f"{hoy_cr.day:02d}/{hoy_cr.month:02d}/{hoy_cr.year}"
-            emp_marcaje = st.session_state['usuario']
+        if not usuario_encontrado.empty:
+            estado_user = str(usuario_encontrado["Estado"].values[0])
+            emp_nombre = str(usuario_encontrado["Trabajador"].values[0])
             
-            db_fresca = cargar_datos_limpios("Hoja 1")
-            
-            mask_hoy = (db_fresca["Trabajador"] == emp_marcaje) & (db_fresca["Fecha"] == hoy_cr) & (db_fresca["Salida"] == "Pendiente") if not db_fresca.empty else pd.Series([False])
-            
-            if tipo_marcaje == "Marcar Entrada":
+            if estado_user == "Activo":
+                hora_actual_str = ahora_cr.strftime("%H:%M")
+                fecha_actual_str = f"{hoy_cr.day:02d}/{hoy_cr.month:02d}/{hoy_cr.year}"
+                
+                db_fresca = cargar_datos_limpios("Hoja 1")
+                
+                mask_hoy = (db_fresca["Trabajador"] == emp_nombre) & (db_fresca["Fecha"] == hoy_cr) & (db_fresca["Salida"] == "Pendiente") if not db_fresca.empty else pd.Series([False])
+                
                 if not db_fresca.empty and mask_hoy.any():
-                    st.warning("⚠️ Ya tienes una entrada marcada para hoy sin cerrar salida.")
-                else:
-                    nueva_entrada = {
-                        "Fecha": fecha_actual_str,
-                        "Trabajador": emp_marcaje,
-                        "Entrada": hora_actual_str,
-                        "Salida": "Pendiente",
-                        "Horas": 0.0,
-                        "Pago Total": 0.0
-                    }
-                    if not db_fresca.empty:
-                        db_fresca['Fecha'] = db_fresca['Fecha'].apply(lambda x: x.strftime("%d/%m/%Y") if hasattr(x, 'strftime') else x)
-                    updated = pd.concat([db_fresca, pd.DataFrame([nueva_entrada])], ignore_index=True)
-                    conn.update(worksheet="Hoja 1", data=updated)
-                    st.cache_data.clear()
-                    st.success(f"✅ ¡Entrada registrada a las {hora_actual_str}!")
-
-            elif tipo_marcaje == "Marcar Salida":
-                if not db_fresca.empty and mask_hoy.any():
+                    # Marcar Salida
                     idx = db_fresca[mask_hoy].index[-1]
                     h_in_str = db_fresca.loc[idx, "Entrada"]
                     
@@ -156,20 +114,42 @@ else:
                     db_fresca['Fecha'] = db_fresca['Fecha'].apply(lambda x: x.strftime("%d/%m/%Y") if hasattr(x, 'strftime') else x)
                     conn.update(worksheet="Hoja 1", data=db_fresca)
                     st.cache_data.clear()
-                    st.success(f"🏁 ¡Salida registrada a las {hora_actual_str}! ({round(cant_horas, 2)} hrs trabajadas)")
+                    st.success(f"🏁 ¡Salida confirmada para {emp_nombre} a las {hora_actual_str}! ({round(cant_horas, 2)} hrs)")
                 else:
-                    st.error("⚠️ No se encontró una entrada pendiente para hoy.")
+                    # Marcar Entrada
+                    nueva_entrada = {
+                        "Fecha": fecha_actual_str,
+                        "Trabajador": emp_nombre,
+                        "Entrada": hora_actual_str,
+                        "Salida": "Pendiente",
+                        "Horas": 0.0,
+                        "Pago Total": 0.0
+                    }
+                    if not db_fresca.empty:
+                        db_fresca['Fecha'] = db_fresca['Fecha'].apply(lambda x: x.strftime("%d/%m/%Y") if hasattr(x, 'strftime') else x)
+                    updated = pd.concat([db_fresca, pd.DataFrame([nueva_entrada])], ignore_index=True)
+                    conn.update(worksheet="Hoja 1", data=updated)
+                    st.cache_data.clear()
+                    st.success(f"✅ ¡Entrada confirmada para {emp_nombre} a las {hora_actual_str}!")
+            else:
+                st.error("❌ Acceso denegado: Este colaborador se encuentra inactivo.")
+        else:
+            st.error("❌ Código QR no reconocido en el sistema.")
 
-    # =========================================================================
-    # VISTA 2: PANTALLA COMPLETA DE ADMINISTRADOR
-    # =========================================================================
-    elif st.session_state["rol"] == "Admin":
-        st.title("🛡️ Panel de Administración: Bar Restaurante Alaska")
+# =========================================================================
+# MODO 2: PANEL DE ADMINISTRACIÓN
+# =========================================================================
+else:
+    st.subheader("🔒 Iniciar Sesión como Administrador")
+    pin_admin = st.text_input("Ingresa tu PIN de Administrador", type="password", max_chars=4).strip()
+    
+    if pin_admin == "1806":
+        st.success("Acceso concedido al Panel Administrativo")
         
-        st.sidebar.header("📝 Menú de Gestión")
-        opcion_registro = st.sidebar.radio("Opciones", ["Registrar Vale / Adelanto", "Gestionar PINs y Usuarios"])
+        st.sidebar.header("📝 Gestión de Personal")
+        opcion_admin = st.sidebar.radio("Opciones de Gestión", ["Registrar Vale", "Crear/Gestionar Usuarios y QRs"])
 
-        if opcion_registro == "Registrar Vale / Adelanto":
+        if opcion_admin == "Registrar Vale":
             with st.sidebar.form("form_vale", clear_on_submit=True):
                 st.subheader("Registrar Vale / Adelanto")
                 nombre_vale = st.text_input("Trabajador")
@@ -193,35 +173,42 @@ else:
                     updated_v = pd.concat([db_v_fresca, pd.DataFrame([nueva_fila_v])], ignore_index=True)
                     conn.update(worksheet="Vales", data=updated_v)
                     st.cache_data.clear()
-                    st.sidebar.success("✅ Vale guardado")
+                    st.sidebar.success("✅ Vale registrado")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Error al guardar vale: {e}")
+                    st.error("Error al guardar vale.")
 
         else:
             with st.sidebar.form("form_pin", clear_on_submit=True):
-                st.subheader("Asignar PIN y Rol")
+                st.subheader("Crear Usuario / Asignar QR")
                 emp_pin = st.text_input("Nombre del Empleado")
                 num_pin = st.text_input("Asignar PIN (4 dígitos)", max_chars=4)
-                rol_sel = st.selectbox("Rol de Acceso", ["Empleado", "Admin"])
-                guardar_p = st.form_submit_button("🔐 Guardar Usuario")
+                cod_qr = st.text_input("Código de Identificación QR (Ej: EMP-001)")
+                estado_usr = st.selectbox("Estado del Empleado", ["Activo", "Inactivo"])
+                guardar_p = st.form_submit_button("🔐 Guardar Configuración")
 
-            if guardar_p and emp_pin and len(num_pin) == 4:
+            if guardar_p and emp_pin:
                 db_p_fresca = cargar_datos_limpios("Pines")
-                nuevo_p = {"Trabajador": emp_pin.strip().title(), "PIN": str(num_pin).strip(), "Rol": rol_sel}
+                nuevo_p = {
+                    "Trabajador": emp_pin.strip().title(),
+                    "PIN": str(num_pin).strip(),
+                    "Rol": "Empleado",
+                    "Codigo_QR": cod_qr.strip(),
+                    "Estado": estado_usr
+                }
                 try:
                     if not db_p_fresca.empty:
                         db_p_fresca = db_p_fresca[db_p_fresca["Trabajador"] != emp_pin.strip().title()]
                     updated_p = pd.concat([db_p_fresca, pd.DataFrame([nuevo_p])], ignore_index=True)
                     conn.update(worksheet="Pines", data=updated_p)
                     st.cache_data.clear()
-                    st.sidebar.success(f"✅ Usuario {emp_pin} guardado como {rol_sel}")
+                    st.sidebar.success(f"✅ Configuración guardada para {emp_pin}")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Error al guardar usuario: {e}")
+                    st.error("Error al guardar usuario.")
 
-        # PESTAÑAS ADMINISTRATIVAS
-        tab1, tab2, tab3 = st.tabs(["📊 Comprobantes de Pago", "📈 Gráficas y Estadísticas", "🎄 Aguinaldos"])
+        # PESTAÑAS
+        tab1, tab2, tab3 = st.tabs(["📊 Comprobantes de Pago", "📈 Gráficas", "🎄 Aguinaldo"])
 
         with tab1:
             if not db_pagos.empty:
@@ -277,31 +264,8 @@ else:
 
                     msg += f"--------------------------\n💰 *NETO A PAGAR: ₡{neto_pagar:,.2f}*\n--------------------------"
 
-                    col_btn1, col_btn2 = st.columns(2)
-                    with col_btn1:
-                        st.link_button("📲 Enviar Comprobante por WhatsApp", f"https://wa.me/?text={urllib.parse.quote(msg)}")
-                    
-                    with col_btn2:
-                        if not df_v_res.empty:
-                            if st.button("✅ Liquidar y Cerrar Vales de este Pago"):
-                                try:
-                                    db_v_completa = conn.read(worksheet="Vales", ttl=0)
-                                    indices_a_liquidar = df_v_res.index
-                                    db_v_completa.loc[indices_a_liquidar, "Estado"] = "Liquidado"
-                                    db_v_completa['Fecha'] = pd.to_datetime(db_v_completa['Fecha'], dayfirst=True, errors='coerce').dt.strftime("%d/%m/%Y")
-                                    conn.update(worksheet="Vales", data=db_v_completa)
-                                    st.cache_data.clear()
-                                    st.success("🎉 ¡Vales liquidados exitosamente!")
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error("Error al liquidar vales.")
-
+                    st.link_button("📲 Enviar Comprobante por WhatsApp", f"https://wa.me/?text={urllib.parse.quote(msg)}")
                     st.dataframe(df_res[["Fecha", "Entrada", "Salida", "Horas", "Pago Total"]], use_container_width=True)
-                    if not df_v_res.empty:
-                        st.subheader("💸 Vales Aplicados (Pendientes)")
-                        st.dataframe(df_v_res[["Fecha", "Concepto", "Monto", "Estado"]], use_container_width=True)
-                else:
-                    st.warning("No hay datos en el rango seleccionado.")
 
         with tab2:
             st.header("📈 Resumen Gráfico")
@@ -337,33 +301,6 @@ else:
                 m1.metric("Periodo Evaluar", f"{f_inicio_agui.strftime('%d/%m/%Y')} a {f_fin_agui.strftime('%d/%m/%Y')}")
                 m2.metric("Total Salarios Devengados", f"₡{total_acumulado:,.2f}")
                 m3.metric("🎄 AGUINALDO A PAGAR", f"₡{monto_aguinaldo:,.2f}")
-
-        # ADMINISTRACIÓN
-        st.markdown("---")
-        with st.expander("🗑️ Administración: Eliminar Registros / Vales"):
-            st.subheader("Turnos Trabajados")
-            df_ver = db_pagos.copy()
-            if not df_ver.empty:
-                df_ver['Fecha'] = df_ver['Fecha'].apply(lambda x: x.strftime("%d/%m/%Y") if hasattr(x, 'strftime') else x)
-                st.dataframe(df_ver)
-                id_b = st.number_input("ID de Turno a borrar", 0, len(db_pagos)-1 if not db_pagos.empty else 0, key="id_turn")
-                if st.button("❌ Eliminar Turno"):
-                    db_pagos = db_pagos.drop(id_b).reset_index(drop=True)
-                    db_pagos['Fecha'] = db_pagos['Fecha'].apply(lambda x: x.strftime("%d/%m/%Y"))
-                    conn.update(worksheet="Hoja 1", data=db_pagos)
-                    st.cache_data.clear()
-                    st.rerun()
-
-            st.markdown("---")
-            st.subheader("Vales y Adelantos")
-            df_v_ver = db_vales.copy()
-            if not df_v_ver.empty:
-                df_v_ver['Fecha'] = df_v_ver['Fecha'].apply(lambda x: x.strftime("%d/%m/%Y") if hasattr(x, 'strftime') else x)
-                st.dataframe(df_v_ver)
-                id_bv = st.number_input("ID de Vale a borrar", 0, len(db_vales)-1 if not db_vales.empty else 0, key="id_val")
-                if st.button("❌ Eliminar Vale"):
-                    db_vales = db_vales.drop(id_bv).reset_index(drop=True)
-                    db_vales['Fecha'] = db_vales['Fecha'].apply(lambda x: x.strftime("%d/%m/%Y"))
-                    conn.update(worksheet="Vales", data=db_vales)
-                    st.cache_data.clear()
-                    st.rerun()
+    else:
+        if pin_admin != "":
+            st.error("PIN de Administrador incorrecto.")
