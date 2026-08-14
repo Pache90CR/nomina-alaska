@@ -49,7 +49,7 @@ if db_vales.empty:
     db_vales = pd.DataFrame(columns=["Fecha", "Trabajador", "Monto", "Concepto", "Estado"])
 
 # --- ACCESO DE ADMINISTRADOR ---
-st.title("🕒 Nómina y Control de Horas: Alaska / La Chinita")
+st.title("🕒 Nómina y Control de Horas: Alaska")
 
 pin_admin = st.sidebar.text_input("🔑 PIN de Administrador", type="password", max_chars=4).strip()
 
