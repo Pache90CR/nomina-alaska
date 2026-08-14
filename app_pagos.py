@@ -5,8 +5,39 @@ from datetime import datetime, timedelta
 import urllib.parse
 import plotly.express as px
 
-# Configuración de página
-st.set_page_config(page_title="Nómina Bar Restaurante Alaska", layout="wide")
+# --- CONFIGURACIÓN DE PÁGINA PREMIUM ---
+st.set_page_config(
+    page_title="Nómina & Gestión | Bar Restaurante Alaska",
+    page_icon="🍺",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Estilo CSS personalizado para bordes, sombras y tarjetas
+st.markdown("""
+    <style>
+    .main {
+        background-color: #0e1117;
+    }
+    div[data-testid="stMetricValue"] {
+        font-size: 1.8rem !important;
+        font-weight: 700 !important;
+        color: #00E676 !important;
+    }
+    div[data-testid="stMetric"] {
+        background-color: #1e222d;
+        padding: 15px;
+        border-radius: 12px;
+        border: 1px solid #2e3440;
+        box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.2);
+    }
+    .stButton>button {
+        border-radius: 8px;
+        font-weight: 600;
+        transition: all 0.3s ease;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 TARIFA_POR_HORA = 1300
 DIAS_ESPANOL = {
@@ -48,27 +79,29 @@ if db_pagos.empty:
 if db_vales.empty:
     db_vales = pd.DataFrame(columns=["Fecha", "Trabajador", "Monto", "Concepto", "Estado"])
 
-# --- ACCESO DE ADMINISTRADOR ---
-st.title("🕒 Nómina y Control de Horas: Alaska")
+# --- BARRA LATERAL ADMINISTRATIVA ---
+st.sidebar.image("https://img.icons8.com/color/96/restaurant-building.png", width=70)
+st.sidebar.title("Alaska Control")
+st.sidebar.caption("Sistema de Control de Planilla v2.5")
 
-pin_admin = st.sidebar.text_input("🔑 PIN de Administrador", type="password", max_chars=4).strip()
+pin_admin = st.sidebar.text_input("🔑 PIN de Acceso", type="password", max_chars=4).strip()
 
 if pin_admin == "1806":
-    st.sidebar.success("Acceso concedido")
+    st.sidebar.success("● Conectado como Administrador")
+    st.sidebar.divider()
     
-    # --- MENÚ LATERAL DE REGISTROS ---
-    st.sidebar.header("📝 Menú de Registro")
-    tipo_registro = st.sidebar.radio("¿Qué deseas registrar?", ["Turno de Trabajo", "Vale / Adelanto"])
+    # --- FORMULARIOS ORGANIZADOS ---
+    st.sidebar.subheader("📌 Registro Rápido")
+    tipo_registro = st.sidebar.radio("Selecciona Tipo", ["⏱️ Turno Laboral", "💸 Vale / Adelanto"])
 
-    if tipo_registro == "Turno de Trabajo":
+    if tipo_registro == "⏱️ Turno Laboral":
         with st.sidebar.form("form_turno", clear_on_submit=True):
-            st.subheader("Registrar Turno")
-            nombre_reg = st.text_input("Nombre del Trabajador")
-            fecha_reg = st.date_input("Fecha", hoy_cr)
-            c1, c2 = st.columns(2)
-            h_in = c1.time_input("Hora Entrada", datetime.strptime("15:00", "%H:%M"))
-            h_out = c2.time_input("Hora Salida", datetime.strptime("22:00", "%H:%M"))
-            guardar_t = st.form_submit_button("💾 Guardar Turno")
+            nombre_reg = st.text_input("Trabajador", placeholder="Ej: Gladys")
+            fecha_reg = st.date_input("Fecha de Turno", hoy_cr)
+            col_h1, col_h2 = st.columns(2)
+            h_in = col_h1.time_input("Entrada", datetime.strptime("15:00", "%H:%M"))
+            h_out = col_h2.time_input("Salida", datetime.strptime("22:00", "%H:%M"))
+            guardar_t = st.form_submit_button("💾 Guardar Turno", use_container_width=True)
 
         if guardar_t and nombre_reg:
             db_fresca = cargar_datos_limpios("Hoja 1")
@@ -93,19 +126,18 @@ if pin_admin == "1806":
                 updated = pd.concat([db_fresca, pd.DataFrame([nueva_fila])], ignore_index=True)
                 conn.update(worksheet="Hoja 1", data=updated)
                 st.cache_data.clear()
-                st.sidebar.success(f"✅ Turno guardado para {nombre_reg}")
+                st.toast(f"✅ Turno guardado para {nombre_reg}", icon="🎉")
                 st.rerun()
             except Exception as e:
                 st.error("Error al guardar turno.")
 
     else:
         with st.sidebar.form("form_vale", clear_on_submit=True):
-            st.subheader("Registrar Vale / Adelanto")
-            nombre_vale = st.text_input("Nombre del Trabajador")
+            nombre_vale = st.text_input("Trabajador", placeholder="Ej: Gladys")
             fecha_vale = st.date_input("Fecha", hoy_cr)
             monto_vale = st.number_input("Monto (₡)", min_value=500, step=500)
             concepto_vale = st.text_input("Concepto", "Adelanto / Vale")
-            guardar_v = st.form_submit_button("💸 Guardar Vale")
+            guardar_v = st.form_submit_button("💸 Registrar Vale", use_container_width=True)
 
         if guardar_v and nombre_vale and monto_vale > 0:
             db_v_fresca = cargar_datos_limpios("Vales")
@@ -122,26 +154,32 @@ if pin_admin == "1806":
                 updated_v = pd.concat([db_v_fresca, pd.DataFrame([nueva_fila_v])], ignore_index=True)
                 conn.update(worksheet="Vales", data=updated_v)
                 st.cache_data.clear()
-                st.sidebar.success(f"✅ Vale guardado para {nombre_vale}")
+                st.toast(f"✅ Vale guardado para {nombre_vale}", icon="💸")
                 st.rerun()
             except Exception as e:
                 st.error("Error al guardar vale.")
 
+    # --- CABECERA PRINCIPAL ---
+    st.title("🍹 Bar Restaurante Alaska")
+    st.caption("Panel de Control Financiero y Gestión de Planilla")
+    st.divider()
+
     # --- PESTAÑAS PRINCIPALES ---
-    tab1, tab2, tab3 = st.tabs(["📊 Comprobantes de Pago", "📈 Gráficas y Estadísticas", "🎄 Cálculo de Aguinaldo"])
+    tab1, tab2, tab3 = st.tabs(["📄 Comprobantes de Pago", "📈 Dashboard Estadístico", "🎄 Módulo de Aguinaldo"])
 
     # TAB 1: COMPROBANTES DE PAGO
     with tab1:
         if not db_pagos.empty:
-            col_a, col_b, col_c = st.columns(3)
-            emp_lista = sorted(db_pagos["Trabajador"].unique())
-            
-            with col_a:
-                emp_sel = st.selectbox("Empleado", emp_lista)
-            with col_b:
-                f_inicio = st.date_input("Desde", viernes_defecto)
-            with col_c:
-                f_fin = st.date_input("Hasta", hoy_cr)
+            with st.container():
+                c_a, c_b, c_c = st.columns([2, 1, 1])
+                emp_lista = sorted(db_pagos["Trabajador"].unique())
+                
+                with c_a:
+                    emp_sel = st.selectbox("👤 Seleccionar Colaborador", emp_lista)
+                with c_b:
+                    f_inicio = st.date_input("📅 Desde", viernes_defecto)
+                with c_c:
+                    f_fin = st.date_input("📅 Hasta", hoy_cr)
 
             mask = (db_pagos["Trabajador"] == emp_sel) & (db_pagos["Fecha"] >= f_inicio) & (db_pagos["Fecha"] <= f_fin)
             df_res = db_pagos.loc[mask].sort_values('Fecha').copy()
@@ -160,6 +198,18 @@ if pin_admin == "1806":
                 total_v = df_v_res["Monto"].sum() if not df_v_res.empty else 0.0
                 neto_pagar = total_p - total_v
 
+                st.subheader(f"Resumen de Pago: {emp_sel}")
+                
+                # METRIC CARDS (DASHBOARD)
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("⏳ Horas Totales", f"{total_h:.2f} hrs")
+                m2.metric("💵 Bruto Devengado", f"₡{total_p:,.0f}")
+                m3.metric("🔻 Vales / Adelantos", f"₡{total_v:,.0f}")
+                m4.metric("💰 NETO A PAGAR", f"₡{neto_pagar:,.0f}")
+                
+                st.divider()
+
+                # CONSTRUCCIÓN DE MENSAJE WHATSAPP
                 detalle = ""
                 if not df_res.empty:
                     for _, r in df_res.iterrows():
@@ -184,13 +234,13 @@ if pin_admin == "1806":
 
                 msg += f"--------------------------\n💰 *NETO A PAGAR: ₡{neto_pagar:,.2f}*\n--------------------------"
 
-                col_btn1, col_btn2 = st.columns(2)
-                with col_btn1:
-                    st.link_button("📲 Enviar Comprobante por WhatsApp", f"https://wa.me/?text={urllib.parse.quote(msg)}")
+                col_b1, col_b2 = st.columns([2, 1])
+                with col_b1:
+                    st.link_button("📲 Enviar Comprobante por WhatsApp", f"https://wa.me/?text={urllib.parse.quote(msg)}", use_container_width=True)
                 
-                with col_btn2:
+                with col_b2:
                     if not df_v_res.empty:
-                        if st.button("✅ Liquidar y Cerrar Vales de este Pago"):
+                        if st.button("✅ Liquidar Vales de este Periodo", use_container_width=True):
                             try:
                                 db_v_completa = conn.read(worksheet="Vales", ttl=0)
                                 indices_a_liquidar = df_v_res.index
@@ -198,44 +248,58 @@ if pin_admin == "1806":
                                 db_v_completa['Fecha'] = pd.to_datetime(db_v_completa['Fecha'], dayfirst=True, errors='coerce').dt.strftime("%d/%m/%Y")
                                 conn.update(worksheet="Vales", data=db_v_completa)
                                 st.cache_data.clear()
-                                st.success("🎉 ¡Vales liquidados exitosamente!")
+                                st.toast("Vales liquidados exitosamente", icon="✅")
                                 st.rerun()
                             except Exception as e:
                                 st.error("Error al liquidar vales.")
 
-                st.subheader("📋 Resumen de Turnos")
+                st.subheader("📋 Detalle de Turnos Registrados")
                 if not df_res.empty:
                     st.dataframe(df_res[["Fecha", "Entrada", "Salida", "Horas", "Pago Total"]], use_container_width=True)
                 
                 if not df_v_res.empty:
-                    st.subheader("💸 Vales Aplicados (Pendientes)")
+                    st.subheader("💸 Vales y Adelantos Aplicados")
                     st.dataframe(df_v_res[["Fecha", "Concepto", "Monto", "Estado"]], use_container_width=True)
             else:
-                st.warning("No hay turnos ni vales registrados en este rango de fechas.")
+                st.info("No hay registros en el rango de fechas seleccionado.")
         else:
-            st.info("No hay registros en la base de datos.")
+            st.info("No hay registros de planilla guardados en la base de datos.")
 
-    # TAB 2: GRÁFICAS
+    # TAB 2: GRÁFICAS Y DASHBOARD
     with tab2:
-        st.header("📈 Resumen Gráfico de Planilla")
+        st.subheader("📊 Análisis y Estadísticas de Planilla")
         if not db_pagos.empty:
             c_g1, c_g2 = st.columns(2)
             with c_g1:
                 pagos_emp = db_pagos.groupby("Trabajador")["Pago Total"].sum().reset_index()
-                fig_bar = px.bar(pagos_emp, x="Trabajador", y="Pago Total", text_auto='.2s', color="Trabajador", title="Bruto Devengado por Empleado (₡)")
+                fig_bar = px.bar(
+                    pagos_emp, x="Trabajador", y="Pago Total", text_auto='.2s', color="Trabajador",
+                    title="Monto Invertido por Colaborador (₡)",
+                    color_discrete_sequence=px.colors.qualitative.Dark24
+                )
+                fig_bar.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
                 st.plotly_chart(fig_bar, use_container_width=True)
+            
             with c_g2:
                 horas_emp = db_pagos.groupby("Trabajador")["Horas"].sum().reset_index()
-                fig_pie = px.pie(horas_emp, values="Horas", names="Trabajador", title="Distribución de Horas Trabajadas")
+                fig_pie = px.pie(
+                    horas_emp, values="Horas", names="Trabajador", title="Distribución Relativa de Horas",
+                    hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel
+                )
+                fig_pie.update_layout(paper_bgcolor="rgba(0,0,0,0)")
                 st.plotly_chart(fig_pie, use_container_width=True)
+        else:
+            st.info("Registra turnos para visualizar las gráficas.")
 
     # TAB 3: AGUINALDO
     with tab3:
-        st.header("🎄 Cálculo de Aguinaldo (Normativa Costa Rica)")
+        st.subheader("🎄 Cálculo Legal de Aguinaldo (Costa Rica)")
+        st.caption("Cálculo sobre el acumulado de salarios devengados entre el 1 de Diciembre y el 30 de Noviembre.")
+        
         if not db_pagos.empty:
-            emp_agui = st.selectbox("Trabajador", sorted(db_pagos["Trabajador"].unique()), key="agui_emp")
+            emp_agui = st.selectbox("Seleccionar Colaborador", sorted(db_pagos["Trabajador"].unique()), key="agui_emp")
             anio_actual = hoy_cr.year
-            anio_agui = st.number_input("Año del Aguinaldo", min_value=2024, max_value=2030, value=anio_actual)
+            anio_agui = st.number_input("Año del Cálculo", min_value=2024, max_value=2030, value=anio_actual)
             
             f_inicio_agui = datetime(anio_agui - 1, 12, 1).date()
             f_fin_agui = datetime(anio_agui, 11, 30).date()
@@ -246,41 +310,51 @@ if pin_admin == "1806":
             total_acumulado = df_agui["Pago Total"].sum() if not df_agui.empty else 0.0
             monto_aguinaldo = total_acumulado / 12.0
             
-            st.markdown("---")
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Periodo Evaluar", f"{f_inicio_agui.strftime('%d/%m/%Y')} a {f_fin_agui.strftime('%d/%m/%Y')}")
-            m2.metric("Total Salarios Devengados", f"₡{total_acumulado:,.2f}")
-            m3.metric("🎄 AGUINALDO A PAGAR", f"₡{monto_aguinaldo:,.2f}")
+            st.divider()
+            a1, a2, a3 = st.columns(3)
+            a1.metric("Periodo Evaluado", f"{f_inicio_agui.strftime('%d/%m/%Y')} al {f_fin_agui.strftime('%d/%m/%Y')}")
+            a2.metric("Acumulado Devengado", f"₡{total_acumulado:,.2f}")
+            a3.metric("🎄 AGUINALDO PROYECTADO", f"₡{monto_aguinaldo:,.2f}")
+            st.divider()
 
-    # ADMINISTRACIÓN
-    st.markdown("---")
-    with st.expander("🗑️ Administración: Eliminar Registros / Vales"):
-        st.subheader("Turnos Trabajados")
-        df_ver = db_pagos.copy()
-        if not df_ver.empty:
-            df_ver['Fecha'] = df_ver['Fecha'].apply(lambda x: x.strftime("%d/%m/%Y") if hasattr(x, 'strftime') else x)
-            st.dataframe(df_ver)
-            id_b = st.number_input("ID de Turno a borrar", 0, len(db_pagos)-1 if not db_pagos.empty else 0, key="id_turn")
-            if st.button("❌ Eliminar Turno"):
-                db_pagos = db_pagos.drop(id_b).reset_index(drop=True)
-                db_pagos['Fecha'] = db_pagos['Fecha'].apply(lambda x: x.strftime("%d/%m/%Y"))
-                conn.update(worksheet="Hoja 1", data=db_pagos)
-                st.cache_data.clear()
-                st.rerun()
+    # --- SECCIÓN DE ADMINISTRACIÓN / ELIMINACIÓN ---
+    st.divider()
+    with st.expander("🗑️ Centro de Mantenimiento (Eliminar Registros Error)"):
+        col_del1, col_del2 = st.columns(2)
+        
+        with col_del1:
+            st.write("**Turnos de Trabajo**")
+            df_ver = db_pagos.copy()
+            if not df_ver.empty:
+                df_ver['Fecha'] = df_ver['Fecha'].apply(lambda x: x.strftime("%d/%m/%Y") if hasattr(x, 'strftime') else x)
+                st.dataframe(df_ver, use_container_width=True)
+                id_b = st.number_input("ID de Turno a borrar", 0, len(db_pagos)-1 if not db_pagos.empty else 0, key="id_turn")
+                if st.button("❌ Eliminar Turno", use_container_width=True):
+                    db_pagos = db_pagos.drop(id_b).reset_index(drop=True)
+                    db_pagos['Fecha'] = db_pagos['Fecha'].apply(lambda x: x.strftime("%d/%m/%Y"))
+                    conn.update(worksheet="Hoja 1", data=db_pagos)
+                    st.cache_data.clear()
+                    st.toast("Turno eliminado", icon="🗑️")
+                    st.rerun()
 
-        st.markdown("---")
-        st.subheader("Vales y Adelantos")
-        df_v_ver = db_vales.copy()
-        if not df_v_ver.empty:
-            df_v_ver['Fecha'] = df_v_ver['Fecha'].apply(lambda x: x.strftime("%d/%m/%Y") if hasattr(x, 'strftime') else x)
-            st.dataframe(df_v_ver)
-            id_bv = st.number_input("ID de Vale a borrar", 0, len(db_vales)-1 if not db_vales.empty else 0, key="id_val")
-            if st.button("❌ Eliminar Vale"):
-                db_vales = db_vales.drop(id_bv).reset_index(drop=True)
-                db_vales['Fecha'] = db_vales['Fecha'].apply(lambda x: x.strftime("%d/%m/%Y"))
-                conn.update(worksheet="Vales", data=db_vales)
-                st.cache_data.clear()
-                st.rerun()
+        with col_del2:
+            st.write("**Vales y Adelantos**")
+            df_v_ver = db_vales.copy()
+            if not df_v_ver.empty:
+                df_v_ver['Fecha'] = df_v_ver['Fecha'].apply(lambda x: x.strftime("%d/%m/%Y") if hasattr(x, 'strftime') else x)
+                st.dataframe(df_v_ver, use_container_width=True)
+                id_bv = st.number_input("ID de Vale a borrar", 0, len(db_vales)-1 if not db_vales.empty else 0, key="id_val")
+                if st.button("❌ Eliminar Vale", use_container_width=True):
+                    db_vales = db_vales.drop(id_bv).reset_index(drop=True)
+                    db_vales['Fecha'] = db_vales['Fecha'].apply(lambda x: x.strftime("%d/%m/%Y"))
+                    conn.update(worksheet="Vales", data=db_vales)
+                    st.cache_data.clear()
+                    st.toast("Vale eliminado", icon="🗑️")
+                    st.rerun()
 
 else:
-    st.warning("🔒 Por favor, ingresa el PIN de Administrador en el menú lateral para acceder.")
+    # PANTALLA DE ACCESO PROTEGIDO
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    c_login1, c_login2, c_login3 = st.columns([1, 2, 1])
+    with c_login2:
+        st.info("🔒 Sistema de Control Interno Protegido. Ingresa tu PIN de Administrador en la barra lateral izquierda para acceder.")
