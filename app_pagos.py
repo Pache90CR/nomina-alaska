@@ -8,10 +8,9 @@ import plotly.express as px
 # Configuración de página
 st.set_page_config(page_title="Nómina Alaska", layout="wide")
 
-# CSS personalizado para hacer TODO compacto en celulares
+# CSS personalizado compacto
 st.markdown("""
     <style>
-    /* Achicar tarjetas de resumen */
     div[data-testid="stMetricValue"] {
         font-size: 1.2rem !important;
         font-weight: 600 !important;
@@ -82,41 +81,82 @@ if pin_admin == "1806":
     tipo_registro = st.sidebar.radio("Tipo", ["Turno de Trabajo", "Vale / Adelanto"])
 
     if tipo_registro == "Turno de Trabajo":
-        with st.sidebar.form("form_turno", clear_on_submit=True):
-            nombre_reg = st.text_input("Trabajador")
-            fecha_reg = st.date_input("Fecha", hoy_cr)
-            c1, c2 = st.columns(2)
-            h_in = c1.time_input("Entrada", datetime.strptime("15:00", "%H:%M"))
-            h_out = c2.time_input("Salida", datetime.strptime("22:00", "%H:%M"))
-            guardar_t = st.form_submit_button("Guardar Turno")
+        st.sidebar.markdown("---")
+        accion_turno = st.sidebar.radio("Acción de Turno", ["Registrar Entrada", "Registrar Salida"])
+        
+        if accion_turno == "Registrar Entrada":
+            with st.sidebar.form("form_entrada", clear_on_submit=True):
+                nombre_reg = st.text_input("Trabajador")
+                fecha_reg = st.date_input("Fecha", hoy_cr)
+                h_in = st.time_input("Hora Entrada", ahora_cr.time())
+                guardar_e = st.form_submit_button("Marcar Entrada")
 
-        if guardar_t and nombre_reg:
+            if guardar_e and nombre_reg:
+                db_fresca = cargar_datos_limpios("Hoja 1")
+                nueva_fila = {
+                    "Fecha": f"{fecha_reg.day:02d}/{fecha_reg.month:02d}/{fecha_reg.year}",
+                    "Trabajador": nombre_reg.strip().title(),
+                    "Entrada": h_in.strftime("%H:%M"),
+                    "Salida": "Pendiente",
+                    "Horas": 0.0,
+                    "Pago Total": 0.0
+                }
+                try:
+                    if not db_fresca.empty:
+                        db_fresca['Fecha'] = db_fresca['Fecha'].apply(lambda x: x.strftime("%d/%m/%Y") if hasattr(x, 'strftime') else x)
+                    updated = pd.concat([db_fresca, pd.DataFrame([nueva_fila])], ignore_index=True)
+                    conn.update(worksheet="Hoja 1", data=updated)
+                    st.cache_data.clear()
+                    st.sidebar.success(f"Entrada de {nombre_reg} guardada")
+                    st.rerun()
+                except Exception as e:
+                    st.error("Error al guardar entrada.")
+
+        elif accion_turno == "Registrar Salida":
             db_fresca = cargar_datos_limpios("Hoja 1")
-            dt_in = datetime.combine(fecha_reg, h_in)
-            dt_out = datetime.combine(fecha_reg, h_out)
-            if dt_out <= dt_in: dt_out += timedelta(days=1)
             
-            cant_horas = (dt_out - dt_in).total_seconds() / 3600
-            pago_dia = cant_horas * TARIFA_POR_HORA
-            
-            nueva_fila = {
-                "Fecha": f"{fecha_reg.day:02d}/{fecha_reg.month:02d}/{fecha_reg.year}",
-                "Trabajador": nombre_reg.strip().title(),
-                "Entrada": h_in.strftime("%H:%M"),
-                "Salida": h_out.strftime("%H:%M"),
-                "Horas": round(cant_horas, 2),
-                "Pago Total": round(pago_dia, 2)
-            }
-            try:
-                if not db_fresca.empty:
-                    db_fresca['Fecha'] = db_fresca['Fecha'].apply(lambda x: x.strftime("%d/%m/%Y") if hasattr(x, 'strftime') else x)
-                updated = pd.concat([db_fresca, pd.DataFrame([nueva_fila])], ignore_index=True)
-                conn.update(worksheet="Hoja 1", data=updated)
-                st.cache_data.clear()
-                st.sidebar.success("Guardado")
-                st.rerun()
-            except Exception as e:
-                st.error("Error al guardar.")
+            # Filtrar turnos pendientes
+            if not db_fresca.empty:
+                turnos_pendientes = db_fresca[db_fresca["Salida"] == "Pendiente"]
+            else:
+                turnos_pendientes = pd.DataFrame()
+
+            if not turnos_pendientes.empty:
+                with st.sidebar.form("form_salida", clear_on_submit=True):
+                    # Seleccionar trabajador con turno abierto
+                    emp_pendiente = st.selectbox("Trabajador con turno abierto", turnos_pendientes["Trabajador"].unique())
+                    h_out = st.time_input("Hora Salida", ahora_cr.time())
+                    guardar_s = st.form_submit_button("Cerrar Turno (Salida)")
+
+                if guardar_s and emp_pendiente:
+                    # Obtener el último turno abierto de ese empleado
+                    idx = db_fresca[(db_fresca["Trabajador"] == emp_pendiente) & (db_fresca["Salida"] == "Pendiente")].index[-1]
+                    
+                    fecha_t = db_fresca.loc[idx, "Fecha"]
+                    h_in_str = db_fresca.loc[idx, "Entrada"]
+                    
+                    dt_in = datetime.combine(fecha_t, datetime.strptime(h_in_str, "%H:%M").time())
+                    dt_out = datetime.combine(fecha_t, h_out)
+                    if dt_out <= dt_in: dt_out += timedelta(days=1)
+                    
+                    cant_horas = (dt_out - dt_in).total_seconds() / 3600
+                    pago_dia = cant_horas * TARIFA_POR_HORA
+                    
+                    # Actualizar fila
+                    db_fresca.loc[idx, "Salida"] = h_out.strftime("%H:%M")
+                    db_fresca.loc[idx, "Horas"] = round(cant_horas, 2)
+                    db_fresca.loc[idx, "Pago Total"] = round(pago_dia, 2)
+                    
+                    try:
+                        db_fresca['Fecha'] = db_fresca['Fecha'].apply(lambda x: x.strftime("%d/%m/%Y") if hasattr(x, 'strftime') else x)
+                        conn.update(worksheet="Hoja 1", data=db_fresca)
+                        st.cache_data.clear()
+                        st.sidebar.success(f"Salida de {emp_pendiente} registrada ({round(cant_horas, 2)}h)")
+                        st.rerun()
+                    except Exception as e:
+                        st.error("Error al cerrar turno.")
+            else:
+                st.sidebar.info("No hay turnos pendientes por cerrar.")
 
     else:
         with st.sidebar.form("form_vale", clear_on_submit=True):
@@ -180,7 +220,6 @@ if pin_admin == "1806":
 
                 st.subheader(f"Resumen de Pago: {emp_sel}")
                 
-                # METRICAS PEQUEÑAS EN 2 COLUMNAS (COMPACTO)
                 m_col1, m_col2 = st.columns(2)
                 m_col1.metric("Horas Totales", f"{total_h:.2f} hrs")
                 m_col2.metric("Bruto Devengado", f"₡{total_p:,.0f}")
@@ -194,7 +233,8 @@ if pin_admin == "1806":
                 if not df_res.empty:
                     for _, r in df_res.iterrows():
                         dia_nombre = DIAS_ESPANOL[pd.to_datetime(r['Fecha']).strftime('%A')]
-                        detalle += f"• {dia_nombre} {r['Fecha'].strftime('%d/%m/%Y')}: {r['Entrada']} a {r['Salida']} ({r['Horas']}h) -> ₡{r['Pago Total']:,.2f}\n"
+                        salida_lbl = r['Salida'] if r['Salida'] != "Pendiente" else "Sin cerrar"
+                        detalle += f"• {dia_nombre} {r['Fecha'].strftime('%d/%m/%Y')}: {r['Entrada']} a {salida_lbl} ({r['Horas']}h) -> ₡{r['Pago Total']:,.2f}\n"
 
                 detalle_vales = ""
                 if not df_v_res.empty:
