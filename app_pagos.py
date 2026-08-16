@@ -68,7 +68,7 @@ if db_pagos.empty:
 if db_vales.empty:
     db_vales = pd.DataFrame(columns=["Fecha", "Trabajador", "Monto", "Concepto", "Estado"])
 
-st.title("Nómina Alaska / La Chinita")
+st.title("Nómina Alaska")
 
 # --- BARRA LATERAL ---
 st.sidebar.subheader("Registro de Horas y Vales")
