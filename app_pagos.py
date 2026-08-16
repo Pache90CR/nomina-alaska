@@ -57,7 +57,7 @@ def cargar_datos_limpios(worksheet_name="Hoja 1"):
                 
             return df
         return pd.DataFrame()
-    except:
+    except Exception:
         return pd.DataFrame()
 
 db_pagos = cargar_datos_limpios("Hoja 1")
@@ -70,7 +70,7 @@ if db_vales.empty:
 
 st.title("Nómina Alaska / La Chinita")
 
-# --- BARRA LATERAL (REGISTRO DIRECTO) ---
+# --- BARRA LATERAL ---
 st.sidebar.subheader("Registro de Horas y Vales")
 tipo_registro = st.sidebar.radio("Seleccionar Operación", ["Turno de Trabajo", "Vale / Adelanto"])
 
@@ -82,7 +82,6 @@ if tipo_registro == "Turno de Trabajo":
         with st.sidebar.form("form_entrada", clear_on_submit=True):
             nombre_reg = st.text_input("Trabajador")
             fecha_reg = st.date_input("Fecha", hoy_cr)
-            # Hora fija por defecto (14:00) para evitar que se ponga la hora actual sola
             h_in = st.time_input("Hora Entrada", datetime.strptime("14:00", "%H:%M").time(), key="time_in_fix")
             guardar_e = st.form_submit_button("Marcar Entrada")
 
@@ -105,7 +104,7 @@ if tipo_registro == "Turno de Trabajo":
                 st.sidebar.success(f"Entrada de {nombre_reg} guardada a las {h_in.strftime('%H:%M')}")
                 st.rerun()
             except Exception as e:
-                st.error("Error al guardar entrada.")
+                st.sidebar.error(f"Error al guardar entrada: {e}")
 
     elif accion_turno == "Registrar Salida":
         db_fresca = cargar_datos_limpios("Hoja 1")
@@ -129,7 +128,8 @@ if tipo_registro == "Turno de Trabajo":
                 
                 dt_in = datetime.combine(fecha_t, datetime.strptime(h_in_str, "%H:%M").time())
                 dt_out = datetime.combine(fecha_t, h_out)
-                if dt_out <= dt_in: dt_out += timedelta(days=1)
+                if dt_out <= dt_in:
+                    dt_out += timedelta(days=1)
                 
                 cant_horas = (dt_out - dt_in).total_seconds() / 3600
                 pago_dia = cant_horas * TARIFA_POR_HORA
@@ -145,7 +145,7 @@ if tipo_registro == "Turno de Trabajo":
                     st.sidebar.success(f"Salida de {emp_pendiente} registrada ({round(cant_horas, 2)}h)")
                     st.rerun()
                 except Exception as e:
-                    st.error("Error al cerrar turno.")
+                    st.sidebar.error(f"Error al cerrar turno: {e}")
         else:
             st.sidebar.info("No hay turnos pendientes por cerrar.")
 
@@ -175,7 +175,7 @@ else:
             st.sidebar.success("Vale guardado")
             st.rerun()
         except Exception as e:
-            st.error("Error al guardar vale.")
+            st.sidebar.error(f"Error al guardar vale: {e}")
 
 # --- PESTAÑAS PRINCIPALES ---
 tab1, tab2, tab3 = st.tabs(["Comprobantes", "Gráficas", "Aguinaldo"])
